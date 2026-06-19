@@ -20,19 +20,22 @@ use crate::nfsserve::transaction_tracker::TransactionTracker;
 use crate::nfsserve::xdr::XDR;
 
 // Private items of the parent (nfs_handlers) module under test.
-use super::{nfsproc3_write, WRITE3args};
+use super::{nfsproc3_write, stable_how, WRITE3args};
 
 use agentfs_sdk::{AgentFS, AgentFSOptions, FileSystem};
 
-/// Non-root uid that will own the test files (so owner mode bits apply).
+/// Arbitrary non-root uid/gid that own the test files. The exact values are
+/// not significant — they only need to be non-zero so owner mode bits are
+/// actually enforced (root would bypass the permission check). 501/20 happen
+/// to be macOS-conventional.
 const OWNER_UID: u32 = 501;
 const OWNER_GID: u32 = 20;
 
-fn status_code(status: &nfsstat3) -> u32 {
+pub(super) fn status_code(status: &nfsstat3) -> u32 {
     status.to_u32().expect("nfsstat3 -> u32")
 }
 
-async fn make_context() -> (RPCContext, tempfile::TempDir) {
+pub(super) async fn make_context() -> (RPCContext, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("delta.db");
     let agentfs = AgentFS::open(AgentFSOptions::with_path(db_path.to_str().unwrap()))
@@ -61,7 +64,7 @@ async fn make_context() -> (RPCContext, tempfile::TempDir) {
 
 /// Create a file in the root directory with the given mode, owned by OWNER_UID,
 /// and return its fileid.
-async fn create_file_with_mode(ctx: &RPCContext, name: &str, mode: u32) -> nfs::fileid3 {
+pub(super) async fn create_file_with_mode(ctx: &RPCContext, name: &str, mode: u32) -> nfs::fileid3 {
     let root = ctx.vfs.root_dir();
     let attr = nfs::sattr3 {
         mode: nfs::set_mode3::mode(mode),
@@ -82,7 +85,7 @@ async fn run_write(ctx: &RPCContext, fileid: nfs::fileid3, offset: u64, data: &[
         file: ctx.vfs.id_to_fh(fileid),
         offset,
         count: data.len() as u32,
-        stable: 2, // FILE_SYNC
+        stable: stable_how::FILE_SYNC as u32,
         data: data.to_vec(),
     };
 
